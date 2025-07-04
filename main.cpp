@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 #include <cmath>
+#include <limits>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -34,6 +35,10 @@ float animationTime = 0.0f;
 float camX = 0.0f, camY = 0.0f, camZ = 5.0f;
 float yaw = 0.0f, pitch = 0.0f;
 
+// Model bounding box data
+float modelCenter[3] = {0.0f, 0.0f, 0.0f};
+float modelRadius = 1.0f;
+
 void loadModel(const std::string& path) {
     scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals);
     if(!scene) {
@@ -41,6 +46,12 @@ void loadModel(const std::string& path) {
         exit(1);
     }
     meshes.clear();
+    float minX = std::numeric_limits<float>::max();
+    float minY = std::numeric_limits<float>::max();
+    float minZ = std::numeric_limits<float>::max();
+    float maxX = std::numeric_limits<float>::lowest();
+    float maxY = std::numeric_limits<float>::lowest();
+    float maxZ = std::numeric_limits<float>::lowest();
     for(unsigned int i = 0; i < scene->mNumMeshes; ++i) {
         aiMesh* aMesh = scene->mMeshes[i];
         Mesh mesh;
@@ -50,6 +61,12 @@ void loadModel(const std::string& path) {
             aiVector3D norm = aMesh->mNormals[v];
             aiVector3D uv = aMesh->HasTextureCoords(0) ? aMesh->mTextureCoords[0][v] : aiVector3D(0,0,0);
             mesh.vertices[v] = {{pos.x, pos.y, pos.z}, {norm.x, norm.y, norm.z}, {uv.x, uv.y}};
+            if(pos.x < minX) minX = pos.x;
+            if(pos.y < minY) minY = pos.y;
+            if(pos.z < minZ) minZ = pos.z;
+            if(pos.x > maxX) maxX = pos.x;
+            if(pos.y > maxY) maxY = pos.y;
+            if(pos.z > maxZ) maxZ = pos.z;
         }
         mesh.indices.reserve(aMesh->mNumFaces*3);
         for(unsigned int f = 0; f < aMesh->mNumFaces; ++f) {
@@ -59,6 +76,16 @@ void loadModel(const std::string& path) {
         }
         meshes.push_back(std::move(mesh));
     }
+    modelCenter[0] = (minX + maxX) * 0.5f;
+    modelCenter[1] = (minY + maxY) * 0.5f;
+    modelCenter[2] = (minZ + maxZ) * 0.5f;
+    float dx = maxX - minX;
+    float dy = maxY - minY;
+    float dz = maxZ - minZ;
+    modelRadius = std::max({dx, dy, dz}) * 0.5f;
+    camX = 0.0f;
+    camY = 0.0f;
+    camZ = modelRadius * 3.0f;
 }
 
 void drawMeshes() {
@@ -149,6 +176,7 @@ void display() {
     glRotatef(pitch, 1,0,0);
     glRotatef(yaw, 0,1,0);
     glTranslatef(-camX, -camY, -camZ);
+    glTranslatef(-modelCenter[0], -modelCenter[1], -modelCenter[2]);
 
     updateAnimation(delta);
     drawMeshes();
