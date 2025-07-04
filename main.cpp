@@ -180,10 +180,13 @@ void updateAnimation(float delta) {
         aiQuaternion rot = interpolateRotation(channel, animationTimeTicks);
         aiVector3D pos = interpolatePosition(channel, animationTimeTicks);
 
+        static aiVector3D basePos = channel->mPositionKeys[0].mValue;
+        aiVector3D localPos = pos - basePos;
+
         std::cout << "Anim time " << animationTimeTicks << " pos("
                   << pos.x << "," << pos.y << "," << pos.z << ")";
 
-        glTranslatef(pos.x, pos.y, pos.z);
+        glTranslatef(localPos.x, localPos.y, localPos.z);
 
         float angle = 2.0f * acosf(rot.w) * 180.0f / static_cast<float>(M_PI);
         float s = sqrtf(1.0f - rot.w * rot.w);
