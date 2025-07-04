@@ -8,6 +8,7 @@
 #include <string>
 #include <cmath>
 #include <limits>
+#include <iomanip>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -40,11 +41,13 @@ float modelCenter[3] = {0.0f, 0.0f, 0.0f};
 float modelRadius = 1.0f;
 
 void loadModel(const std::string& path) {
+    std::cout << "Loading model: " << path << std::endl;
     scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals);
     if(!scene) {
         std::cerr << "Failed to load: " << path << std::endl;
         exit(1);
     }
+    std::cout << "\tMeshes: " << scene->mNumMeshes << "  Animations: " << scene->mNumAnimations << std::endl;
     meshes.clear();
     float minX = std::numeric_limits<float>::max();
     float minY = std::numeric_limits<float>::max();
@@ -74,6 +77,8 @@ void loadModel(const std::string& path) {
             for(unsigned int j=0;j<face.mNumIndices;++j)
                 mesh.indices.push_back(face.mIndices[j]);
         }
+        std::cout << "\tMesh " << i << " vertices: " << mesh.vertices.size()
+                  << " indices: " << mesh.indices.size() << std::endl;
         meshes.push_back(std::move(mesh));
     }
     modelCenter[0] = (minX + maxX) * 0.5f;
@@ -83,12 +88,28 @@ void loadModel(const std::string& path) {
     float dy = maxY - minY;
     float dz = maxZ - minZ;
     modelRadius = std::max({dx, dy, dz}) * 0.5f;
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "\tBounding box min(" << minX << ", " << minY << ", " << minZ
+              << ") max(" << maxX << ", " << maxY << ", " << maxZ << ")" << std::endl;
+    std::cout << "\tModel center(" << modelCenter[0] << ", " << modelCenter[1]
+              << ", " << modelCenter[2] << ") radius " << modelRadius << std::endl;
     camX = 0.0f;
     camY = 0.0f;
     camZ = modelRadius * 3.0f;
+    std::cout << "\tCamera start position(" << camX << ", " << camY << ", "
+              << camZ << ")" << std::endl;
 }
 
 void drawMeshes() {
+    static bool first = true;
+    if(first) {
+        std::cout << "Drawing " << meshes.size() << " meshes" << std::endl;
+        for(size_t i = 0; i < meshes.size(); ++i) {
+            std::cout << "\tMesh " << i << " vertices: " << meshes[i].vertices.size()
+                      << " indices: " << meshes[i].indices.size() << std::endl;
+        }
+        first = false;
+    }
     for(const Mesh& mesh : meshes) {
         glBegin(GL_TRIANGLES);
         for(unsigned int idx : mesh.indices) {
@@ -147,20 +168,38 @@ void updateAnimation(float delta) {
     double timeInTicks = animationTime * ticksPerSecond;
     double animationTimeTicks = fmod(timeInTicks, anim->mDuration);
 
+    static bool animInfo = true;
+    if(animInfo) {
+        std::cout << "Animation duration: " << anim->mDuration
+                  << " ticksPerSecond: " << ticksPerSecond << std::endl;
+        animInfo = false;
+    }
     // Apply first channel's animation to the whole model for demonstration
     if(anim->mNumChannels > 0) {
         aiNodeAnim* channel = anim->mChannels[0];
         aiQuaternion rot = interpolateRotation(channel, animationTimeTicks);
         aiVector3D pos = interpolatePosition(channel, animationTimeTicks);
 
-        glTranslatef(pos.x, pos.y, pos.z);
+        static aiVector3D basePos = channel->mPositionKeys[0].mValue;
+        aiVector3D localPos = pos - basePos;
+
+        std::cout << "Anim time " << animationTimeTicks << " pos("
+                  << pos.x << "," << pos.y << "," << pos.z << ")";
+
+        glTranslatef(localPos.x, localPos.y, localPos.z);
 
         float angle = 2.0f * acosf(rot.w) * 180.0f / static_cast<float>(M_PI);
         float s = sqrtf(1.0f - rot.w * rot.w);
-        if(s < 0.001f)
+        if(s < 0.001f) {
             glRotatef(angle, rot.x, rot.y, rot.z);
-        else
+            std::cout << " rot(" << rot.x << "," << rot.y << "," << rot.z
+                      << ")";
+        } else {
             glRotatef(angle, rot.x / s, rot.y / s, rot.z / s);
+            std::cout << " rot(" << rot.x / s << "," << rot.y / s << ","
+                      << rot.z / s << ")";
+        }
+        std::cout << " angle " << angle << std::endl;
     }
 }
 
@@ -169,6 +208,10 @@ void display() {
     int currentTime = glutGet(GLUT_ELAPSED_TIME);
     float delta = (currentTime - lastTime) / 1000.0f;
     lastTime = currentTime;
+    static int frame = 0;
+    std::cout << "Frame " << frame++ << " delta " << delta
+              << " cam(" << camX << "," << camY << "," << camZ
+              << ") yaw " << yaw << " pitch " << pitch << std::endl;
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_MODELVIEW);
@@ -203,6 +246,8 @@ void keyboard(unsigned char key, int, int) {
         case 'a': camX -= speed; break;
         case 'd': camX += speed; break;
     }
+    std::cout << "Camera position(" << camX << "," << camY << "," << camZ
+              << ")" << std::endl;
 }
 
 void arrows(int key, int, int) {
@@ -213,6 +258,7 @@ void arrows(int key, int, int) {
         case GLUT_KEY_LEFT: yaw += rot; break;
         case GLUT_KEY_RIGHT: yaw -= rot; break;
     }
+    std::cout << "View yaw " << yaw << " pitch " << pitch << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -220,6 +266,7 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: " << argv[0] << " <file.fbx>" << std::endl;
         return 1;
     }
+    std::cout << "Starting viewer" << std::endl;
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(800, 600);
