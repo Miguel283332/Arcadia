@@ -189,7 +189,9 @@ void reshape(int w, int h) {
     glViewport(0,0,w,h);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(45.0f, (float)w/h, 0.1f, 100.0f);
+    // Increase the far clipping plane to avoid culling animated models that
+    // move further from the origin.
+    gluPerspective(45.0f, (float)w/h, 0.1f, 1000.0f);
     glMatrixMode(GL_MODELVIEW);
 }
 
