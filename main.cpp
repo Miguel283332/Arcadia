@@ -6,6 +6,10 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 // Simple structure to hold mesh data
 struct Vertex {
@@ -69,6 +73,45 @@ void drawMeshes() {
     }
 }
 
+// Helper functions to interpolate animation keys
+static aiQuaternion interpolateRotation(aiNodeAnim* channel, double time) {
+    if(channel->mNumRotationKeys == 1)
+        return channel->mRotationKeys[0].mValue;
+
+    unsigned int index = 0;
+    for(; index < channel->mNumRotationKeys - 1; ++index) {
+        if(time < channel->mRotationKeys[index + 1].mTime)
+            break;
+    }
+    unsigned int next = index + 1;
+    double delta = channel->mRotationKeys[next].mTime - channel->mRotationKeys[index].mTime;
+    double factor = (time - channel->mRotationKeys[index].mTime) / delta;
+    aiQuaternion out;
+    aiQuaternion::Interpolate(out,
+                              channel->mRotationKeys[index].mValue,
+                              channel->mRotationKeys[next].mValue,
+                              static_cast<float>(factor));
+    out.Normalize();
+    return out;
+}
+
+static aiVector3D interpolatePosition(aiNodeAnim* channel, double time) {
+    if(channel->mNumPositionKeys == 1)
+        return channel->mPositionKeys[0].mValue;
+
+    unsigned int index = 0;
+    for(; index < channel->mNumPositionKeys - 1; ++index) {
+        if(time < channel->mPositionKeys[index + 1].mTime)
+            break;
+    }
+    unsigned int next = index + 1;
+    double delta = channel->mPositionKeys[next].mTime - channel->mPositionKeys[index].mTime;
+    double factor = (time - channel->mPositionKeys[index].mTime) / delta;
+    aiVector3D start = channel->mPositionKeys[index].mValue;
+    aiVector3D end = channel->mPositionKeys[next].mValue;
+    return start + (end - start) * static_cast<float>(factor);
+}
+
 void updateAnimation(float delta) {
     if(!scene || !scene->HasAnimations()) return;
     animationTime += delta;
@@ -77,14 +120,20 @@ void updateAnimation(float delta) {
     double timeInTicks = animationTime * ticksPerSecond;
     double animationTimeTicks = fmod(timeInTicks, anim->mDuration);
 
-    // Apply first channel's rotation to whole model for demonstration
+    // Apply first channel's animation to the whole model for demonstration
     if(anim->mNumChannels > 0) {
         aiNodeAnim* channel = anim->mChannels[0];
-        if(channel->mNumRotationKeys > 0) {
-            aiQuatKey& key = channel->mRotationKeys[0];
-            aiQuaternion q = key.mValue;
-            glRotatef(q.w*180.0f, q.x, q.y, q.z);
-        }
+        aiQuaternion rot = interpolateRotation(channel, animationTimeTicks);
+        aiVector3D pos = interpolatePosition(channel, animationTimeTicks);
+
+        glTranslatef(pos.x, pos.y, pos.z);
+
+        float angle = 2.0f * acosf(rot.w) * 180.0f / static_cast<float>(M_PI);
+        float s = sqrtf(1.0f - rot.w * rot.w);
+        if(s < 0.001f)
+            glRotatef(angle, rot.x, rot.y, rot.z);
+        else
+            glRotatef(angle, rot.x / s, rot.y / s, rot.z / s);
     }
 }
 
