@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <functional>
 #include <cmath>
 #include <limits>
 #include <iomanip>
@@ -14,10 +15,13 @@
 #endif
 
 // Simple structure to hold mesh data
+// Vertex data structure including skinning information for up to 4 bones
 struct Vertex {
     float position[3];
     float normal[3];
     float texCoord[2];
+    unsigned int boneIDs[4] = {0,0,0,0};
+    float boneWeights[4] = {0.f,0.f,0.f,0.f};
 };
 
 struct Mesh {
@@ -26,6 +30,15 @@ struct Mesh {
 };
 
 std::vector<Mesh> meshes;
+
+// Bone mapping and animation state
+struct BoneInfo {
+    aiMatrix4x4 offset;
+    aiMatrix4x4 finalTransform;
+};
+std::map<std::string, unsigned int> boneMapping;
+std::vector<BoneInfo> boneInfo;
+aiMatrix4x4 globalInverse;
 
 // Animation data
 const aiScene* scene = nullptr;
@@ -49,6 +62,10 @@ void loadModel(const std::string& path) {
     }
     std::cout << "\tMeshes: " << scene->mNumMeshes << "  Animations: " << scene->mNumAnimations << std::endl;
     meshes.clear();
+    boneMapping.clear();
+    boneInfo.clear();
+    globalInverse = scene->mRootNode->mTransformation;
+    globalInverse.Inverse();
     float minX = std::numeric_limits<float>::max();
     float minY = std::numeric_limits<float>::max();
     float minZ = std::numeric_limits<float>::max();
@@ -71,6 +88,33 @@ void loadModel(const std::string& path) {
             if(pos.y > maxY) maxY = pos.y;
             if(pos.z > maxZ) maxZ = pos.z;
         }
+        // Load bone weights
+        for(unsigned int b=0; b<aMesh->mNumBones; ++b) {
+            aiBone* bone = aMesh->mBones[b];
+            unsigned int boneIndex = 0;
+            auto it = boneMapping.find(bone->mName.C_Str());
+            if(it == boneMapping.end()) {
+                boneIndex = boneInfo.size();
+                boneMapping[bone->mName.C_Str()] = boneIndex;
+                BoneInfo info;
+                info.offset = bone->mOffsetMatrix;
+                boneInfo.push_back(info);
+            } else {
+                boneIndex = it->second;
+            }
+            for(unsigned int w=0; w<bone->mNumWeights; ++w) {
+                const aiVertexWeight& vw = bone->mWeights[w];
+                Vertex& vert = mesh.vertices[vw.mVertexId];
+                for(int k=0;k<4;++k) {
+                    if(vert.boneWeights[k]==0.f) {
+                        vert.boneIDs[k] = boneIndex;
+                        vert.boneWeights[k] = vw.mWeight;
+                        break;
+                    }
+                }
+            }
+        }
+
         mesh.indices.reserve(aMesh->mNumFaces*3);
         for(unsigned int f = 0; f < aMesh->mNumFaces; ++f) {
             aiFace face = aMesh->mFaces[f];
@@ -114,8 +158,19 @@ void drawMeshes() {
         glBegin(GL_TRIANGLES);
         for(unsigned int idx : mesh.indices) {
             const Vertex& v = mesh.vertices[idx];
+            aiVector3D pos(0,0,0);
+            for(int i=0;i<4;++i){
+                if(v.boneWeights[i] > 0.f){
+                    aiMatrix4x4 transform = boneInfo[v.boneIDs[i]].finalTransform;
+                    aiVector3D p(v.position[0], v.position[1], v.position[2]);
+                    p *= transform;
+                    pos += p * v.boneWeights[i];
+                }
+            }
+            if(pos == aiVector3D(0,0,0))
+                pos = aiVector3D(v.position[0], v.position[1], v.position[2]);
             glNormal3fv(v.normal);
-            glVertex3fv(v.position);
+            glVertex3f(pos.x, pos.y, pos.z);
         }
         glEnd();
     }
@@ -168,39 +223,35 @@ void updateAnimation(float delta) {
     double timeInTicks = animationTime * ticksPerSecond;
     double animationTimeTicks = fmod(timeInTicks, anim->mDuration);
 
-    static bool animInfo = true;
-    if(animInfo) {
-        std::cout << "Animation duration: " << anim->mDuration
-                  << " ticksPerSecond: " << ticksPerSecond << std::endl;
-        animInfo = false;
-    }
-    // Apply first channel's animation to the whole model for demonstration
-    if(anim->mNumChannels > 0) {
-        aiNodeAnim* channel = anim->mChannels[0];
-        aiQuaternion rot = interpolateRotation(channel, animationTimeTicks);
-        aiVector3D pos = interpolatePosition(channel, animationTimeTicks);
-
-        static aiVector3D basePos = channel->mPositionKeys[0].mValue;
-        aiVector3D localPos = pos - basePos;
-
-        std::cout << "Anim time " << animationTimeTicks << " pos("
-                  << pos.x << "," << pos.y << "," << pos.z << ")";
-
-        glTranslatef(localPos.x, localPos.y, localPos.z);
-
-        float angle = 2.0f * acosf(rot.w) * 180.0f / static_cast<float>(M_PI);
-        float s = sqrtf(1.0f - rot.w * rot.w);
-        if(s < 0.001f) {
-            glRotatef(angle, rot.x, rot.y, rot.z);
-            std::cout << " rot(" << rot.x << "," << rot.y << "," << rot.z
-                      << ")";
-        } else {
-            glRotatef(angle, rot.x / s, rot.y / s, rot.z / s);
-            std::cout << " rot(" << rot.x / s << "," << rot.y / s << ","
-                      << rot.z / s << ")";
+    // Recursive update of all bones
+    std::function<void(const aiNode*, const aiMatrix4x4&)> readNode;
+    readNode = [&](const aiNode* node, const aiMatrix4x4& parent){
+        std::string name(node->mName.C_Str());
+        aiMatrix4x4 nodeTransform = node->mTransformation;
+        // find corresponding animation channel
+        aiNodeAnim* channel = nullptr;
+        for(unsigned int i=0;i<anim->mNumChannels;++i){
+            if(name == anim->mChannels[i]->mNodeName.C_Str()){ channel = anim->mChannels[i]; break; }
         }
-        std::cout << " angle " << angle << std::endl;
-    }
+        if(channel){
+            aiQuaternion rot = interpolateRotation(channel, animationTimeTicks);
+            aiVector3D pos = interpolatePosition(channel, animationTimeTicks);
+            aiMatrix4x4 mat = aiMatrix4x4(rot.GetMatrix());
+            mat.a4 = pos.x; mat.b4 = pos.y; mat.c4 = pos.z;
+            nodeTransform = mat;
+        }
+        aiMatrix4x4 global = parent * nodeTransform;
+        auto it = boneMapping.find(name);
+        if(it != boneMapping.end()){
+            unsigned int index = it->second;
+            boneInfo[index].finalTransform = globalInverse * global * boneInfo[index].offset;
+        }
+        for(unsigned int i=0;i<node->mNumChildren;++i)
+            readNode(node->mChildren[i], global);
+    };
+
+    aiMatrix4x4 identity; // identity matrix
+    readNode(scene->mRootNode, identity);
 }
 
 void display() {
