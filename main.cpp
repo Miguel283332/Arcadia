@@ -8,6 +8,7 @@
 #include <string>
 #include <functional>
 #include <cmath>
+#include <sstream>
 #include <limits>
 #include <iomanip>
 #ifndef M_PI
@@ -48,6 +49,36 @@ float animationTime = 0.0f;
 // Camera controls
 float camX = 0.0f, camY = 0.0f, camZ = 5.0f;
 float yaw = 0.0f, pitch = 0.0f;
+float cameraDistance = 5.0f;
+bool isPlaying = false;
+
+void updateCamera() {
+    float yawRad = yaw * static_cast<float>(M_PI) / 180.0f;
+    float pitchRad = pitch * static_cast<float>(M_PI) / 180.0f;
+    camX = modelCenter[0] + cameraDistance * cosf(pitchRad) * sinf(yawRad);
+    camY = modelCenter[1] + cameraDistance * sinf(pitchRad);
+    camZ = modelCenter[2] + cameraDistance * cosf(pitchRad) * cosf(yawRad);
+}
+
+void drawText(int x, int y, const std::string& text) {
+    int vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, vp[2], 0, vp[3]);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glRasterPos2i(x, vp[3] - y);
+    for(char c : text) {
+        glutBitmapCharacter(GLUT_BITMAP_8_BY_13, c);
+    }
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
 
 // Model bounding box data
 float modelCenter[3] = {0.0f, 0.0f, 0.0f};
@@ -138,9 +169,10 @@ void loadModel(const std::string& path) {
               << ") max(" << maxX << ", " << maxY << ", " << maxZ << ")" << std::endl;
     std::cout << "\tModel center(" << modelCenter[0] << ", " << modelCenter[1]
               << ", " << modelCenter[2] << ") radius " << modelRadius << std::endl;
-    camX = 0.0f;
-    camY = 0.0f;
-    camZ = modelRadius * 3.0f;
+    cameraDistance = modelRadius * 3.0f;
+    yaw = 0.0f;
+    pitch = 0.0f;
+    updateCamera();
     std::cout << "\tCamera start position(" << camX << ", " << camY << ", "
               << camZ << ")" << std::endl;
 }
@@ -218,7 +250,8 @@ static aiVector3D interpolatePosition(aiNodeAnim* channel, double time) {
 
 void updateAnimation(float delta) {
     if(!scene || !scene->HasAnimations()) return;
-    animationTime += delta;
+    if(isPlaying)
+        animationTime += delta;
     const aiAnimation* anim = scene->mAnimations[0];
     double ticksPerSecond = anim->mTicksPerSecond != 0 ? anim->mTicksPerSecond : 25.0;
     double timeInTicks = animationTime * ticksPerSecond;
@@ -268,13 +301,18 @@ void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glRotatef(pitch, 1,0,0);
-    glRotatef(yaw, 0,1,0);
-    glTranslatef(-camX, -camY, -camZ);
-    glTranslatef(-modelCenter[0], -modelCenter[1], -modelCenter[2]);
+    updateCamera();
+    gluLookAt(camX, camY, camZ,
+              modelCenter[0], modelCenter[1], modelCenter[2],
+              0.0f, 1.0f, 0.0f);
 
     updateAnimation(delta);
     drawMeshes();
+
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(2)
+        << "Cam(" << camX << "," << camY << "," << camZ << ")";
+    drawText(10, 20, oss.str());
 
     glutSwapBuffers();
     glutPostRedisplay();
@@ -291,15 +329,18 @@ void reshape(int w, int h) {
 }
 
 void keyboard(unsigned char key, int, int) {
-    const float speed = 0.1f;
+    const float speed = 0.2f;
+    const float rot = 2.0f;
     switch(key) {
-        case 'w': camZ -= speed; break;
-        case 's': camZ += speed; break;
-        case 'a': camX -= speed; break;
-        case 'd': camX += speed; break;
+        case 'w': cameraDistance -= speed; if(cameraDistance < 0.1f) cameraDistance = 0.1f; break;
+        case 's': cameraDistance += speed; break;
+        case 'a': yaw -= rot; break;
+        case 'd': yaw += rot; break;
+        case ' ': isPlaying = !isPlaying; break;
     }
-    std::cout << "Camera position(" << camX << "," << camY << "," << camZ
-              << ")" << std::endl;
+    updateCamera();
+    std::cout << "Camera distance " << cameraDistance << " yaw " << yaw
+              << " pitch " << pitch << std::endl;
 }
 
 void arrows(int key, int, int) {
@@ -310,6 +351,7 @@ void arrows(int key, int, int) {
         case GLUT_KEY_LEFT: yaw += rot; break;
         case GLUT_KEY_RIGHT: yaw -= rot; break;
     }
+    updateCamera();
     std::cout << "View yaw " << yaw << " pitch " << pitch << std::endl;
 }
 
