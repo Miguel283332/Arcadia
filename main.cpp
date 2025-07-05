@@ -52,6 +52,10 @@ float yaw = 0.0f, pitch = 0.0f;
 float cameraDistance = 5.0f;
 bool isPlaying = false;
 
+// Model bounding box data
+float modelCenter[3] = {0.0f, 0.0f, 0.0f};
+float modelRadius = 1.0f;
+
 void updateCamera() {
     float yawRad = yaw * static_cast<float>(M_PI) / 180.0f;
     float pitchRad = pitch * static_cast<float>(M_PI) / 180.0f;
@@ -79,10 +83,6 @@ void drawText(int x, int y, const std::string& text) {
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
 }
-
-// Model bounding box data
-float modelCenter[3] = {0.0f, 0.0f, 0.0f};
-float modelRadius = 1.0f;
 
 void loadModel(const std::string& path) {
     std::cout << "Loading model: " << path << std::endl;
