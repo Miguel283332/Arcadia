@@ -96,8 +96,9 @@ void loadModel(const std::string& path) {
             if(it == boneMapping.end()) {
                 boneIndex = boneInfo.size();
                 boneMapping[bone->mName.C_Str()] = boneIndex;
-                BoneInfo info;
+                BoneInfo info{};
                 info.offset = bone->mOffsetMatrix;
+                info.finalTransform = aiMatrix4x4();
                 boneInfo.push_back(info);
             } else {
                 boneIndex = it->second;
